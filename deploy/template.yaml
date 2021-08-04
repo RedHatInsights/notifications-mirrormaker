@@ -1,0 +1,106 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: notifications-kafka-mirror
+
+parameters:
+- name: KAFKA_VERSION
+  value: "2.7.0"
+- name: REPLICAS
+  value: "1"
+- name: SOURCE_BOOTSTRAP_SERVERS
+  required: true
+- name: TARGET_BOOTSTRAP_SERVERS
+  required: true
+- name: TARGET_USER
+  value: mirrormaker
+- name: TARGET_PASSWORD_SECRET
+  required: true
+- name: TARGET_CERT_SECRET
+  required: true
+- name: CONNECT_REPLICATION_FACTOR
+  value: "1"
+- name: CONNECT_TASKS_MAX
+  value: "1"
+- name: TOPIC_REFRESH_INTERVAL
+  value: "30"
+- name: TOPIC_PATTERN
+  required: true
+- name: LOG_LEVEL
+  value: INFO
+- name: XMX
+  value: 1g
+- name: XMS
+  value: 1g
+- name: REQUESTS_CPU
+  value: "1"
+- name: REQUESTS_MEMORY
+  value: "512Mi"
+- name: LIMITS_CPU
+  value: "2"
+- name: LIMITS_MEMORY
+  value: "2Gi"
+
+objects:
+- apiVersion: kafka.strimzi.io/v1beta2
+  kind: KafkaMirrorMaker2
+  metadata:
+    name: notifications-mirror
+  spec:
+    version: ${KAFKA_VERSION}
+    replicas: ${{REPLICAS}}
+    connectCluster: target-cluster
+    clusters:
+    - alias: source-cluster
+      bootstrapServers: ${SOURCE_BOOTSTRAP_SERVERS}
+    - alias: target-cluster
+      bootstrapServers: ${TARGET_BOOTSTRAP_SERVERS}
+      authentication:
+        username: ${TARGET_USER}
+        passwordSecret:
+          secretName: ${TARGET_PASSWORD_SECRET}
+          password: password
+        type: scram-sha-512
+      tls:
+        trustedCertificates:
+        - certificate: ca.crt
+          secretName: ${TARGET_CERT_SECRET}
+      config:
+        config.storage.replication.factor: ${{CONNECT_REPLICATION_FACTOR}}
+        offset.storage.replication.factor: ${{CONNECT_REPLICATION_FACTOR}}
+        status.storage.replication.factor: ${{CONNECT_REPLICATION_FACTOR}}
+        ssl.endpoint.identification.algorithm: HTTPS
+    mirrors:
+    - sourceCluster: source-cluster
+      targetCluster: target-cluster
+      sourceConnector:
+        tasksMax: ${{CONNECT_TASKS_MAX}}
+        config:
+          replication.factor: ${{CONNECT_REPLICATION_FACTOR}}
+          offset-syncs.topic.replication.factor: ${{CONNECT_REPLICATION_FACTOR}}
+          sync.topic.acls.enabled: "false"
+          refresh.topics.interval.seconds: ${{TOPIC_REFRESH_INTERVAL}}
+          replication.policy.separator: ""
+          replication.policy.class: "io.strimzi.kafka.connect.mirror.IdentityReplicationPolicy"
+      heartbeatConnector:
+        config:
+          heartbeats.topic.replication.factor: ${{CONNECT_REPLICATION_FACTOR}}
+      checkpointConnector:
+        config:
+          checkpoints.topic.replication.factor: ${{CONNECT_REPLICATION_FACTOR}}
+          replication.policy.class: "io.strimzi.kafka.connect.mirror.IdentityReplicationPolicy"
+      topicsPattern: "${TOPIC_PATTERN}"
+    resources:
+      requests:
+        cpu: ${REQUESTS_CPU}
+        memory: ${REQUESTS_MEMORY}
+      limits:
+        cpu: ${LIMITS_CPU}
+        memory: ${LIMITS_MEMORY}
+    logging:
+      type: inline
+      loggers:
+        connect.root.logger.level: ${LOG_LEVEL}
+    jvmOptions:
+      "-Xmx": "${XMX}"
+      "-Xms": "${XMS}"
